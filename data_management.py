@@ -1958,7 +1958,7 @@ def variable_categorization(df, dataset_name):
     
     selected_var = st.selectbox("选择变量", df.columns.tolist())
     
-        if selected_var:
+    if selected_var:
         current_type = "数值型" if selected_var in numeric_vars else "分类型" if selected_var in categorical_vars else "日期型"
         st.info(f"当前类型: {current_type}")
         
@@ -2449,6 +2449,5 @@ def generate_statistical_report(df, dataset_name):
     """
     
     return html_content
-
 
 
