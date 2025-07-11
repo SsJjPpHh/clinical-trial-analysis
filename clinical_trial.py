@@ -1,19 +1,22 @@
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import scipy.stats as stats
-from scipy.stats import chi2_contingency, fisher_exact, mannwhitneyu, ttest_ind, wilcoxon
-import seaborn as sns
-import matplotlib.pyplot as plt
-from datetime import datetime, timedelta
-import warnings
-warnings.filterwarnings('ignore')
+from datetime import datetime, date, timedelta
+import random
 
-def clinical_trial_analysis():
+class ClinicalTrialModule:
+    """临床试验设计模块 - 包装现有的分析函数"""
+    
+    def __init__(self):
+        self.trial_data = None
+        
+    def render(self):
+        """渲染临床试验设计界面"""
+        # 调用现有的临床试验分析函数
+        from clinical_trial import clinical_trial_analysis
+        clinical_trial_analysis()
     """临床试验分析主函数"""
     st.markdown("# 🧪 临床试验分析")
     st.markdown("*专业的临床试验数据分析工具，支持多种试验设计和统计分析*")
