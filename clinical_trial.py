@@ -13,8 +13,6 @@ import warnings
 warnings.filterwarnings('ignore')
 
 def clinical_trial_analysis():
-        
-        
     """临床试验分析主函数"""
     st.markdown("# 🧪 临床试验分析")
     st.markdown("*专业的临床试验数据分析工具，支持多种试验设计和统计分析*")
@@ -41,6 +39,17 @@ def clinical_trial_analysis():
     if not datasets:
         st.warning("⚠️ 请先在数据管理模块中导入临床试验数据")
         st.info("💡 您可以使用示例数据集中的'临床试验数据'进行学习")
+        
+        # 提供示例数据选项
+        if st.button("🎲 生成临床试验示例数据", use_container_width=True):
+            sample_data = generate_clinical_trial_sample_data()
+            st.session_state['dataset_clinical_sample'] = {
+                'name': '临床试验示例数据',
+                'data': sample_data,
+                'upload_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            st.success("✅ 示例数据已生成！")
+            st.rerun()
         return
     
     # 选择数据集
