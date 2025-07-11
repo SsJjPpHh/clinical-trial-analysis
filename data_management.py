@@ -31,7 +31,7 @@ def data_management_ui():
         data_exploration_section()
     
     with tab3:
-        data_cleaning_section
+        data_cleaning_section()
     
     with tab4:
         variable_management_section()

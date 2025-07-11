@@ -13,12 +13,15 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # 导入自定义模块 - 修复导入方式，导入函数而不是类
 try:
     from clinical_trial import clinical_trial_analysis
-    from data_management import data_management_analysis
+    from data_management import data_management_ui
     from epidemiology import epidemiology_analysis
+    from randomization import randomization_module
+    from reporting import reporting_module
+    from sample_size import sample_size_calculator
     from survival_analysis import survival_analysis
-    from sample_size import sample_size_calculation
-    from randomization import randomization_analysis
-    from reporting import reporting_analysis
+except ImportError as e:
+    st.error(f"模块导入错误: {e}")
+    st.stop()
     
     # 创建占位符函数用于未完成的模块
     def statistical_analysis_placeholder():
