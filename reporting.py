@@ -1,104 +1,84 @@
-# reporting.py  ────────────────────────────────────────────────
+# reporting.py
 """
-自动报告生成器（重构版）
-Author : Hu Fan
-Date   : 2025-07-11
+快速生成 Markdown 报告
+
+• 选择要插入的数据集、结果表
+• 自定义章节内容
+• 一键导出 Markdown / HTML
 """
+
 from __future__ import annotations
+
 import streamlit as st
 import pandas as pd
-import io
 from datetime import datetime
-import base64
+from typing import Dict
 
-# ╭─────────────────── 数据接口 ────────────────────╮
-def get_dataset() -> tuple[pd.DataFrame | None, str]:
-    ds = st.session_state.get("dataset_current")
-    if ds:
-        return ds["data"], ds["name"]
-    return None, ""
+# -------- 会话工具 -------- #
+def list_datasets() -> Dict[str, pd.DataFrame]:
+    ds = {}
+    for k, v in st.session_state.items():
+        if k.startswith("dataset_") and isinstance(v, dict) and "data" in v:
+            ds[v["name"]] = v["data"]
+    return ds
 
-
-def get_rand_table() -> tuple[pd.DataFrame | None, str]:
-    rt = st.session_state.get("rand_table")
-    if rt:
-        return rt["data"], rt["name"]
-    return None, ""
-
-
-# ╭─────────────────── 报告生成逻辑 ───────────────────╮
-def build_markdown_report(sections: list[str]) -> str:
-    """
-    根据用户选择的章节，拼接 Markdown 文本
-    """
-    md: list[str] = [f"# 📑 试验分析报告  \n生成时间：{datetime.now():%Y-%m-%d %H:%M}"]
-    df, name = get_dataset()
-    if "数据概览" in sections and df is not None:
-        md += [
-            "## 1. 数据概览",
-            f"- 数据集：**{name}**",
-            f"- 行数：{len(df)}",
-            f"- 列数：{len(df.columns)}",
-            "",
-            "```text",
-            df.head().to_string(index=False),
-            "```",
-        ]
-
-    if "随机表" in sections:
-        rt, label = get_rand_table()
-        if rt is not None:
-            md += [
-                "## 2. 随机分组表",
-                f"方案：**{label}**  ",
-                "```text",
-                rt.head().to_string(index=False),
-                "```",
-            ]
-        else:
-            md.append("> ⚠️ 未检测到随机表，已跳过该章节。")
-
-    if "自定义段落" in sections:
-        md += [
-            "## 3. 讨论与结论",
-            "（此处可在导出的 Markdown 文件中继续补充）",
-        ]
-
-    return "\n".join(md)
-
-
-def download_markdown(md: str, filename: str) -> None:
-    """
-    提供 Markdown 下载按钮
-    """
-    b64 = base64.b64encode(md.encode()).decode()  # str -> base64
-    href = f'<a href="data:text/markdown;base64,{b64}" download="{filename}">⬇️ 点击下载 Markdown</a>'
-    st.markdown(href, unsafe_allow_html=True)
-
-
-# ╭─────────────────── UI ────────────────────────────╮
+# -------- UI -------- #
 def reporting_ui() -> None:
-    st.title("📝 报告生成器")
-    st.markdown("选择需要包含的部分，一键生成 Markdown 报告。")
+    st.set_page_config("报告生成", "📝", layout="wide")
+    st.markdown("# 📝 报告生成")
 
-    df, _ = get_dataset()
-    if df is None:
-        st.warning("请先在数据管理中心导入数据。")
+    st.sidebar.markdown("## 报告结构")
+    title = st.sidebar.text_input("报告标题", "研究分析报告")
+    author = st.sidebar.text_input("作者/团队", "")
+    date_str = datetime.today().strftime("%Y-%m-%d")
+    abstract = st.text_area("摘要", "")
 
-    st.sidebar.header("📋 章节选择")
-    sections = st.sidebar.multiselect(
-        "包含以下章节",
-        ["数据概览", "随机表", "自定义段落"],
-        default=["数据概览"],
-    )
+    st.markdown("### **正文撰写**")
+    intro = st.text_area("1. 背景与目的", "", height=150)
+    methods = st.text_area("2. 方法", "", height=150)
+    results_text = st.text_area("3. 结果（文字描述）", "", height=150)
+    discussion = st.text_area("4. 讨论", "", height=150)
 
-    if st.button("生成报告"):
-        md = build_markdown_report(sections)
-        st.success("报告已生成，可在下方预览并下载。")
-        st.markdown(md)
-        download_markdown(md, f"report_{datetime.now():%Y%m%d%H%M}.md")
+    # 插入结果表
+    st.markdown("#### 插入数据表")
+    datasets = list_datasets()
+    table_names = st.multiselect("选择要附加为附录的数据集", list(datasets.keys()))
+    # 预览
+    for name in table_names:
+        with st.expander(f"📄 {name}"):
+            st.dataframe(datasets[name].head())
 
+    if st.button("📑 生成 Markdown 报告"):
+        lines = [
+            f"# {title}",
+            f"*{author}*  \n{date_str}",
+            "",
+            "## 摘要",
+            abstract,
+            "## 1. 背景与目的",
+            intro,
+            "## 2. 方法",
+            methods,
+            "## 3. 结果",
+            results_text,
+        ]
+        # 自动添加表格
+        for name in table_names:
+            lines.append(f"### 附录：{name}")
+            lines.append(datasets[name].head().to_markdown(index=False))
+        lines.append("## 4. 讨论")
+        lines.append(discussion)
+        md_report = "\n\n".join(lines)
+
+        st.success("报告生成成功✅")
+        st.markdown("---")
+        st.markdown(md_report)
+
+        # 下载
+        st.download_button("📥 下载 Markdown", md_report.encode("utf-8-sig"), "report.md", "text/markdown")
+        html = st.markdown(md_report, unsafe_allow_html=True)
+        st.download_button("📥 下载 HTML", html.html.encode("utf-8-sig"), "report.html", "text/html")
 
 if __name__ == "__main__":
-    st.set_page_config(page_title="报告生成器", layout="wide")
     reporting_ui()
+

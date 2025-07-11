@@ -1,283 +1,346 @@
-# data_management.py ───────────────────────────────────────────────
+# data_management.py
 """
-数据管理中心（重构版）
-Author : Your Name
-Date   : 2025-07-11
+数据管理中心 (重构版)
+
+Streamlit 入口示例：
+-------------------------------------------
+import streamlit as st
+from data_management import data_management_ui
+data_management_ui()
+-------------------------------------------
 """
 
 from __future__ import annotations
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-import plotly.express as px
 import io
-from typing import Tuple, Dict, Any
+import json
 from datetime import datetime
-
-# ╭──────────────────────── 公共常量 ─────────────────────────╮
-READERS: Dict[str, Any] = {
-    "csv": pd.read_csv,
-    "xlsx": pd.read_excel,
-    "xls": pd.read_excel,
-    "json": pd.read_json,
-    "sav": pd.read_spss,
-    "dta": pd.read_stata,
-    "sas7bdat": pd.read_sas,
-}
+from typing import Dict, List, Tuple
+import plotly.express as px
+import plotly.graph_objects as go
 
 
-# ╭─────────────────── Cached I/O & Session Utils ──────────────────╮
-@st.cache_data(show_spinner=False)
-def load_file(uploaded, suffix: str) -> pd.DataFrame:
-    """根据后缀读取文件"""
-    read_fn = READERS[suffix]
-    return read_fn(uploaded)
+# ============ Session 数据集管理 ============ #
+
+def _session_dataset_key(name: str) -> str:
+    return f"dataset_{name}"
 
 
-def set_current_dataset(df: pd.DataFrame, name: str) -> None:
-    """把最新数据写入 SessionState，键名固定为 dataset_current"""
-    st.session_state["dataset_current"] = {
+def save_dataset_to_session(name: str, df: pd.DataFrame) -> None:
+    st.session_state[_session_dataset_key(name)] = {
         "name": name,
         "data": df,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "upload_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
 
-def get_current_dataset() -> Tuple[pd.DataFrame | None, str]:
-    ds = st.session_state.get("dataset_current")
-    if ds:
-        return ds["data"], ds["name"]
-    return None, ""
+def delete_dataset_from_session(name: str) -> None:
+    st.session_state.pop(_session_dataset_key(name), None)
 
 
-# ╭───────────────────────── 标签页 1 数据导入 ──────────────────────╮
-def tab_import() -> None:
+def list_datasets() -> Dict[str, pd.DataFrame]:
+    ds = {}
+    for k, v in st.session_state.items():
+        if k.startswith("dataset_") and isinstance(v, dict) and "data" in v:
+            ds[v["name"]] = v["data"]
+    return ds
+
+
+# ============ 文件读取工具 ============ #
+
+@st.cache_data(show_spinner=False)
+def _read_uploaded_file(file) -> pd.DataFrame | None:
+    """
+    根据扩展名自动解析，返回 DataFrame
+    支持 csv / tsv / xlsx / json / sav / dta / sas7bdat / parquet
+    """
+    name = file.name.lower()
+    try:
+        if name.endswith(".csv"):
+            return pd.read_csv(file)
+        if name.endswith((".tsv", ".txt")):
+            return pd.read_csv(file, sep="\t")
+        if name.endswith((".xlsx", ".xls")):
+            return pd.read_excel(file)
+        if name.endswith(".json"):
+            return pd.read_json(file)
+        if name.endswith(".parquet"):
+            return pd.read_parquet(file)
+        if name.endswith(".sav"):
+            return pd.read_spss(file)
+        if name.endswith(".dta"):
+            return pd.read_stata(file)
+        if name.endswith((".sas7bdat", ".sas")):
+            return pd.read_sas(file)
+    except Exception as e:
+        st.error(f"❌ 文件解析失败: {e}")
+    return None
+
+
+# ============ 1. 数据导入 ============ #
+
+def data_import_section() -> None:
     st.markdown("### 📥 数据导入")
 
-    import_method = st.radio(
-        "选择数据导入方式",
-        ["📂 文件上传", "🖇️ 数据库连接", "🗂️ 示例数据", "✏️ 手动输入"],
-        horizontal=True,
+    uploaded_file = st.file_uploader(
+        "选择数据文件",
+        type=[
+            "csv",
+            "tsv",
+            "txt",
+            "xlsx",
+            "xls",
+            "json",
+            "sav",
+            "dta",
+            "sas7bdat",
+            "parquet",
+        ],
+        help="支持 CSV/TSV、Excel、JSON、SPSS、Stata、SAS、Parquet 等格式",
     )
 
-    if import_method == "📂 文件上传":
-        uploaded = st.file_uploader(
-            "上传数据文件",
-            type=list(READERS.keys()),
-            help="支持 CSV / Excel / JSON / SAV / DTA / SAS7BDAT 等格式",
-        )
-        if uploaded:
-            suffix = uploaded.name.split(".")[-1].lower()
-            try:
-                df = load_file(uploaded, suffix)
-                set_current_dataset(df, uploaded.name)
-                st.success(f"✅ 文件 {uploaded.name} 导入成功！")
-            except Exception as e:
-                st.error(f"读取失败：{e}")
-
-    elif import_method == "🖇️ 数据库连接":
-        st.info("数据库连接功能开发中，敬请期待…")
-
-    elif import_method == "🗂️ 示例数据":
-        df = px.data.tips()  # Plotly 自带示例
-        set_current_dataset(df, "示例数据 tips")
-        st.success("已载入示例数据 tips")
-
-    elif import_method == "✏️ 手动输入":
-        st.caption("在下方粘贴 CSV 文本：")
-        txt = st.text_area("CSV 文本")
-        if st.button("解析"):
-            try:
-                df = pd.read_csv(io.StringIO(txt))
-                set_current_dataset(df, "手动输入数据")
-                st.success("解析成功")
-            except Exception as e:
-                st.error(e)
-
-    # 预览
-    df, name = get_current_dataset()
-    if df is not None:
-        with st.expander(f"👀 数据预览 – {name}", expanded=False):
-            st.write(df.head())
+    if uploaded_file is not None:
+        df = _read_uploaded_file(uploaded_file)
+        if df is not None:
+            st.success(f"✅ 文件读取成功！共 {df.shape[0]} 行 {df.shape[1]} 列。")
+            st.dataframe(df.head())
+            default_name = uploaded_file.name.split(".")[0]
+            new_name = st.text_input("为数据集命名", value=default_name)
+            if st.button("💾 保存到会话"):
+                save_dataset_to_session(new_name, df)
+                st.success("已保存！")
+    st.markdown("---")
+    st.markdown("#### 已加载数据集")
+    show_loaded_datasets()
 
 
-# ╭─────────────────── 标签页 2 数据探索 ──────────────────────────╮
-def tab_explore() -> None:
-    st.markdown("### 🔍 数据探索")
-    df, _ = get_current_dataset()
-    if df is None:
-        st.warning("请先导入数据")
+def show_loaded_datasets() -> None:
+    datasets = list_datasets()
+    if not datasets:
+        st.info("暂无数据集")
+        return
+    for name, df in datasets.items():
+        with st.expander(f"📂 {name} ({df.shape[0]}×{df.shape[1]})"):
+            st.dataframe(df.head())
+            col1, col2 = st.columns(2)
+            with col1:
+                csv = df.to_csv(index=False).encode("utf-8-sig")
+                st.download_button("⬇️ 下载 CSV", csv, file_name=f"{name}.csv", mime="text/csv")
+            with col2:
+                if st.button("🗑️ 删除", key=f"del_{name}"):
+                    delete_dataset_from_session(name)
+                    st.experimental_rerun()
+
+
+# ============ 2. 数据探索 ============ #
+
+def data_exploration_section() -> None:
+    st.markdown("### 🔎 数据探索")
+    datasets = list_datasets()
+    if not datasets:
+        st.info("请先在『数据导入』中加载数据")
         return
 
-    st.write("#### 1️⃣ 基本信息")
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("行数", len(df))
-    c2.metric("列数", len(df.columns))
-    c3.metric("缺失值总数", int(df.isna().sum().sum()))
-    c4.metric("重复行", int(df.duplicated().sum()))
+    name = st.selectbox("选择数据集", list(datasets.keys()))
+    df = datasets[name]
 
-    st.write("#### 2️⃣ 描述性统计")
-    st.dataframe(df.describe(include="all").T)
+    sub_tabs = st.tabs(["👁️ 概览", "📈 分布", "🔗 相关性"])
+    # --- 概览
+    with sub_tabs[0]:
+        st.write("#### 基本信息")
+        st.write(df.describe(include="all").T)
+        st.write("#### 缺失值概览")
+        miss = df.isna().sum().to_frame("缺失数")
+        miss["缺失率"] = (miss["缺失数"] / len(df)).round(3)
+        st.dataframe(miss)
 
-    st.write("#### 3️⃣ 缺失值热图")
-    if st.checkbox("显示热图"):
-        fig = px.imshow(df.isna(), aspect="auto", color_continuous_scale="RdBu_r")
+    # --- 分布
+    with sub_tabs[1]:
+        col = st.selectbox("选择变量绘制分布图", df.columns)
+        if pd.api.types.is_numeric_dtype(df[col]):
+            fig = px.histogram(df, x=col, marginal="box", nbins=30)
+        else:
+            fig = px.histogram(df, x=col, color=col)
         st.plotly_chart(fig, use_container_width=True)
 
-    st.write("#### 4️⃣ 变量分布")
-    col = st.selectbox("选择列绘图", df.columns)
-    if pd.api.types.is_numeric_dtype(df[col]):
-        st.plotly_chart(px.histogram(df, x=col, nbins=30), use_container_width=True)
-    else:
-        st.plotly_chart(px.bar(df[col].value_counts().reset_index(),
-                               x="index", y=col), use_container_width=True)
+    # --- 相关性
+    with sub_tabs[2]:
+        num_cols = df.select_dtypes("number").columns
+        if len(num_cols) < 2:
+            st.info("数值变量不足 2 个，无法绘制相关性热图")
+        else:
+            corr = df[num_cols].corr()
+            fig = px.imshow(
+                corr,
+                text_auto=True,
+                aspect="auto",
+                color_continuous_scale="RdBu_r",
+                origin="lower",
+                title="相关系数热图",
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
 
-# ╭─────────────────── 标签页 3 数据清洗 ──────────────────────────╮
-def tab_clean() -> None:
-    st.markdown("### 🛠️ 数据清洗")
-    df, name = get_current_dataset()
-    if df is None:
-        st.warning("请先导入数据")
+# ============ 3. 数据清洗 ============ #
+
+def data_cleaning_section() -> None:
+    st.markdown("### 🧹 数据清洗")
+
+    datasets = list_datasets()
+    if not datasets:
+        st.info("请先加载数据")
         return
+    name = st.selectbox("选择要清洗的数据集", list(datasets.keys()), key="clean_ds")
+    df = datasets[name].copy()
 
-    st.write(f"当前数据集：**{name}**")
+    st.markdown("#### 缺失值处理")
+    miss_cols = df.columns[df.isna().any()].tolist()
+    if miss_cols:
+        with st.expander(f"有缺失值的列 ({len(miss_cols)})", expanded=False):
+            st.dataframe(df[miss_cols].isna().sum())
 
-    # 缺失值处理
-    st.subheader("① 缺失值处理")
-    strategy = st.selectbox("选择策略", ("不处理", "删除含缺失的行", "均值填充", "中位数填充", "众数填充"))
-    if st.button("执行缺失值处理"):
-        if strategy == "删除含缺失的行":
-            df = df.dropna()
-        elif strategy in ("均值填充", "中位数填充", "众数填充"):
-            for col in df.columns:
-                if df[col].isna().any():
-                    if pd.api.types.is_numeric_dtype(df[col]):
-                        val = (
-                            df[col].mean() if strategy == "均值填充"
-                            else df[col].median()
-                        )
-                    else:
-                        val = df[col].mode().iloc[0]
-                    df[col].fillna(val, inplace=True)
-        set_current_dataset(df, name + " (cleaned)")
-        st.success("缺失值处理完成 ✅")
+        col_sel = st.multiselect("选择要填充缺失值的列", miss_cols)
+        fill_strategy = st.selectbox("填充策略", ["均值", "中位数", "众数", "常数"])
+        const_val = None
+        if fill_strategy == "常数":
+            const_val = st.text_input("填充值", "0")
+        if st.button("🩹 执行填充"):
+            for c in col_sel:
+                if fill_strategy == "均值":
+                    df[c].fillna(df[c].mean(), inplace=True)
+                elif fill_strategy == "中位数":
+                    df[c].fillna(df[c].median(), inplace=True)
+                elif fill_strategy == "众数":
+                    df[c].fillna(df[c].mode().iloc[0], inplace=True)
+                else:
+                    df[c].fillna(const_val, inplace=True)
+            st.success("缺失值填充完成")
 
-    # 重复值处理
-    st.subheader("② 重复行处理")
-    if st.button("删除重复行"):
-        df = df.drop_duplicates()
-        set_current_dataset(df, name + " (cleaned)")
-        st.success("重复行已删除")
+    st.markdown("#### 重复值处理")
+    dup_count = df.duplicated().sum()
+    st.write(f"检测到 {dup_count} 行重复")
+    if dup_count > 0 and st.button("🚮 删除重复行"):
+        df.drop_duplicates(inplace=True)
+        st.success("已删除重复行")
 
-    # 异常值（IQR）清理
-    st.subheader("③ 异常值处理（IQR）")
-    num_cols = df.select_dtypes("number").columns.tolist()
-    target_col = st.selectbox("选择数值列", num_cols)
-    if st.button("去除异常值"):
-        q1, q3 = df[target_col].quantile([0.25, 0.75])
-        iqr = q3 - q1
-        mask = df[target_col].between(q1 - 1.5 * iqr, q3 + 1.5 * iqr)
-        df = df[mask]
-        set_current_dataset(df, name + " (cleaned)")
-        st.success("异常值已删除")
-
-    with st.expander("当前数据快照"):
-        st.write(df.head())
+    st.markdown("---")
+    new_name = st.text_input("为清洗后的数据集命名", value=f"{name}_clean")
+    if st.button("💾 保存清洗结果"):
+        save_dataset_to_session(new_name, df)
+        st.success("保存成功！")
 
 
-# ╭─────────────────── 标签页 4 变量管理 ──────────────────────────╮
-def tab_variables() -> None:
+# ============ 4. 变量管理 ============ #
+
+def variable_management_section() -> None:
     st.markdown("### 📝 变量管理")
-    df, name = get_current_dataset()
-    if df is None:
-        st.warning("请先导入数据")
+
+    datasets = list_datasets()
+    if not datasets:
+        st.info("请先加载数据")
         return
+    name = st.selectbox("选择数据集", list(datasets.keys()), key="var_ds")
+    df = datasets[name].copy()
 
-    st.write(f"数据集：**{name}**")
-
-    # 字段重命名
-    col_to_rename = st.selectbox("选择列重命名", df.columns)
-    new_name = st.text_input("新列名")
-    if st.button("重命名"):
+    st.markdown("#### 重命名变量")
+    col1, col2 = st.columns(2)
+    with col1:
+        old_name = st.selectbox("原变量名", df.columns)
+    with col2:
+        new_name = st.text_input("新变量名")
+    if st.button("✏️ 重命名"):
         if new_name:
-            df.rename(columns={col_to_rename: new_name}, inplace=True)
-            set_current_dataset(df, name)
+            df.rename(columns={old_name: new_name}, inplace=True)
             st.success("已重命名")
 
-    # 类型转换
-    col_to_convert = st.selectbox("选择列转换类型", df.columns, key="convert")
-    new_type = st.selectbox("目标类型", ("字符串", "分类", "整数", "浮点", "日期"))
-    if st.button("转换"):
+    st.markdown("#### 变量类型转换")
+    col = st.selectbox("选择变量", df.columns, key="dtype_col")
+    target_type = st.selectbox("转换为", ["数值", "分类", "日期"])
+    if st.button("🔄 转换类型"):
         try:
-            if new_type == "字符串":
-                df[col_to_convert] = df[col_to_convert].astype(str)
-            elif new_type == "分类":
-                df[col_to_convert] = df[col_to_convert].astype("category")
-            elif new_type == "整数":
-                df[col_to_convert] = pd.to_numeric(df[col_to_convert]).astype("Int64")
-            elif new_type == "浮点":
-                df[col_to_convert] = pd.to_numeric(df[col_to_convert]).astype(float)
-            elif new_type == "日期":
-                df[col_to_convert] = pd.to_datetime(df[col_to_convert])
-            set_current_dataset(df, name)
+            if target_type == "数值":
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+            elif target_type == "分类":
+                df[col] = df[col].astype("category")
+            else:
+                df[col] = pd.to_datetime(df[col], errors="coerce")
             st.success("类型转换成功")
         except Exception as e:
-            st.error(e)
+            st.error(f"转换失败: {e}")
 
-    with st.expander("字段信息"):
-        st.write(df.dtypes)
+    st.markdown("---")
+    new_name2 = st.text_input("保存为新数据集名", value=f"{name}_var")
+    if st.button("💾 保存变量管理结果"):
+        save_dataset_to_session(new_name2, df)
+        st.success("保存成功！")
 
 
-# ╭─────────────────── 标签页 5 数据导出 ──────────────────────────╮
-def tab_export() -> None:
-    st.markdown("### 💾 数据导出")
-    df, name = get_current_dataset()
-    if df is None:
-        st.warning("暂无可导出的数据")
+# ============ 5. 数据导出 ============ #
+
+def data_export_section() -> None:
+    st.markdown("### 📤 数据导出")
+
+    datasets = list_datasets()
+    if not datasets:
+        st.info("请先加载数据")
         return
+    name = st.selectbox("选择数据集", list(datasets.keys()), key="export_ds")
+    df = datasets[name]
 
-    file_fmt = st.selectbox("选择格式", ("csv", "xlsx"))
-    if file_fmt == "csv":
-        buf = io.StringIO()
-        df.to_csv(buf, index=False)
-        bytes_data = buf.getvalue().encode()
-    else:
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine="xlsxwriter") as writer:
-            df.to_excel(writer, index=False)
-        bytes_data = buf.getvalue()
+    fmt = st.selectbox("导出格式", ["csv", "xlsx", "json", "parquet"])
+    if st.button("⬇️ 生成文件"):
+        try:
+            if fmt == "csv":
+                data = df.to_csv(index=False).encode("utf-8-sig")
+            elif fmt == "xlsx":
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                    df.to_excel(writer, index=False)
+                data = buffer.getvalue()
+            elif fmt == "json":
+                data = df.to_json(orient="records").encode()
+            else:
+                buffer = io.BytesIO()
+                df.to_parquet(buffer, index=False)
+                data = buffer.getvalue()
 
-    st.download_button(
-        "⬇️ 点击下载",
-        data=bytes_data,
-        file_name=f"{name}_{datetime.now():%Y%m%d%H%M%S}.{file_fmt}",
-        mime="text/csv" if file_fmt == "csv" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+            st.download_button(
+                label="📥 点击下载",
+                data=data,
+                file_name=f"{name}.{fmt}",
+                mime="application/octet-stream",
+            )
+        except Exception as e:
+            st.error(f"导出失败: {e}")
 
 
-# ╭─────────────────────────── 主界面 ───────────────────────────╮
+# ============ 主 UI ============ #
+
 def data_management_ui() -> None:
-    st.title("📊 数据管理中心")
+    st.set_page_config(page_title="数据管理中心", page_icon="📊", layout="wide")
+    st.markdown("# 📊 数据管理中心")
     st.markdown("*专业的数据导入、清洗、探索和管理工具*")
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["📥 数据导入", "🔍 数据探索", "🛠️ 数据清洗", "📝 变量管理", "💾 数据导出"]
+        ["📥 数据导入", "🔎 数据探索", "🧹 数据清洗", "📝 变量管理", "📤 数据导出"]
     )
 
     with tab1:
-        tab_import()
+        data_import_section()
     with tab2:
-        tab_explore()
+        data_exploration_section()
     with tab3:
-        tab_clean()
+        data_cleaning_section()
     with tab4:
-        tab_variables()
+        variable_management_section()
     with tab5:
-        tab_export()
+        data_export_section()
 
 
-# ╭─────────────────────────── 调试 ────────────────────────────╮
+# ============ 入口保护 ============ #
+
 if __name__ == "__main__":
-    st.set_page_config(page_title="数据管理中心", layout="wide")
     data_management_ui()

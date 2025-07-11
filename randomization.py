@@ -1,171 +1,136 @@
-# randomization.py  ───────────────────────────────────────────────
+# randomization.py
 """
-随机分组生成器（重构版）
-Author : H
-Date   : 2025-07-11
+随机化列表生成模块
+
+• Simple / Block / Stratified Block
+• 支持多臂试验、指定块长、指定分层变量
+• 生成结果可保存到会话并下载 CSV
 """
 
 from __future__ import annotations
+
 import streamlit as st
 import pandas as pd
 import numpy as np
-import io
-from typing import List, Dict, Tuple
 from datetime import datetime
+from typing import Dict, List
 
+# ---------------- Session 工具 ---------------- #
+def _session_dataset_key(name: str) -> str:
+    return f"dataset_{name}"
 
-# ╭────────────────────── SessionState 工具 ──────────────────────╮
-def save_rand_table(df: pd.DataFrame, label: str) -> None:
-    st.session_state["rand_table"] = {
+def list_datasets() -> Dict[str, pd.DataFrame]:
+    ds = {}
+    for k, v in st.session_state.items():
+        if k.startswith("dataset_") and isinstance(v, dict) and "data" in v:
+            ds[v["name"]] = v["data"]
+    return ds
+
+def save_dataset(name: str, df: pd.DataFrame) -> None:
+    st.session_state[_session_dataset_key(name)] = {
+        "name": name,
         "data": df,
-        "name": label,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "upload_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
 
+# ---------------- 随机化核心 ---------------- #
+def simple_randomization(n: int, arms: List[str], seed: int | None = None) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    alloc = rng.choice(arms, n)
+    return pd.DataFrame({"id": np.arange(1, n + 1), "treatment": alloc})
 
-def get_rand_table() -> Tuple[pd.DataFrame | None, str]:
-    rt = st.session_state.get("rand_table")
-    if rt:
-        return rt["data"], rt["name"]
-    return None, ""
+def blocked_randomization(
+    n: int, arms: List[str], block_size: int, seed: int | None = None
+) -> pd.DataFrame:
+    rng = np.random.default_rng(seed)
+    if block_size % len(arms) != 0:
+        raise ValueError("块长必须能被组数整除")
+    seq = []
+    while len(seq) < n:
+        block = np.repeat(arms, block_size // len(arms))
+        rng.shuffle(block)
+        seq.extend(block)
+    alloc = seq[:n]
+    return pd.DataFrame({"id": np.arange(1, n + 1), "treatment": alloc})
 
-
-def get_dataset() -> Tuple[pd.DataFrame | None, str]:
-    ds = st.session_state.get("dataset_current")
-    if ds:
-        return ds["data"], ds["name"]
-    return None, ""
-
-
-# ╭──────────────────────── 生成算法实现 ──────────────────────────╮
-def simple_randomization(n: int, ratio: Tuple[int, int] = (1, 1),
-                         seed: int | None = None) -> pd.DataFrame:
+def stratified_block_randomization(
+    df: pd.DataFrame, strat_cols: List[str], arms: List[str], block_size: int, seed: int | None = None
+) -> pd.DataFrame:
     """
-    简单随机：按给定比例随机分配
+    df 必须包含待随机化受试者，每行为 1 名受试者，strat_cols 为分层列
     """
-    np.random.seed(seed)
-    g1, g2 = ratio
-    choices = ["A"] * g1 + ["B"] * g2
-    grp = np.random.choice(choices, size=n, replace=True)
-    return pd.DataFrame({"Subject": range(1, n + 1), "Group": grp})
+    rng = np.random.default_rng(seed)
+    if block_size % len(arms) != 0:
+        raise ValueError("块长必须能被组数整除")
+    alloc_list = []
+    for _, sub in df.groupby(strat_cols):
+        n = len(sub)
+        sub_df = blocked_randomization(n, arms, block_size, seed=rng.integers(1e9))
+        sub_df.index = sub.index
+        alloc_list.append(sub_df)
+    alloc = pd.concat(alloc_list).sort_index()
+    result = df.copy()
+    result["treatment"] = alloc["treatment"]
+    return result.reset_index(drop=True)
 
-
-def permuted_block_randomization(n: int, block_size: int,
-                                 ratio: Tuple[int, int] = (1, 1),
-                                 seed: int | None = None) -> pd.DataFrame:
-    """
-    块随机（固定块长）
-    """
-    np.random.seed(seed)
-    g1, g2 = ratio
-    per_block = ["A"] * g1 + ["B"] * g2
-    # 补齐块内元素
-    per_block = (per_block * (block_size // len(per_block)))[:block_size]
-    blocks: List[str] = []
-    while len(blocks) < n:
-        blk = np.random.permutation(per_block)
-        blocks.extend(blk)
-    grp = blocks[:n]
-    return pd.DataFrame({"Subject": range(1, n + 1), "Group": grp})
-
-
-def stratified_block_randomization(df: pd.DataFrame, strata_cols: List[str],
-                                   block_size: int, ratio: Tuple[int, int] = (1, 1),
-                                   seed: int | None = None) -> pd.DataFrame:
-    """
-    分层块随机：对每个层内再做块随机
-    """
-    np.random.seed(seed)
-    results: List[pd.DataFrame] = []
-    for values, sub in df.groupby(strata_cols):
-        sub = sub.copy()
-        sub.sort_values(by=strata_cols, inplace=True)  # 仅保证 deterministic 行号
-        rand_tbl = permuted_block_randomization(
-            len(sub), block_size, ratio, seed=np.random.randint(1e9)
-        )
-        sub["Group"] = rand_tbl["Group"].values
-        results.append(sub)
-    return pd.concat(results).reset_index(drop=True)
-
-
-# ╭──────────────────────────── UI 主体 ───────────────────────────╮
+# ---------------- UI ---------------- #
 def randomization_ui() -> None:
-    st.title("🎲 随机分组生成器")
-    st.markdown(
-        "*支持 简单随机 / 块随机 / 分层块随机；生成的随机表可下载，并自动保存到 SessionState*"
-    )
+    st.set_page_config("随机化生成", "🎲", layout="wide")
+    st.markdown("# 🎲 随机化列表生成")
 
-    tab_gen, tab_preview = st.tabs(["⚙️ 生成随机表", "📑 随机表预览"])
+    st.sidebar.markdown("## 随机化设置")
+    rand_type = st.sidebar.radio("随机化类型", ["Simple", "Blocked", "Stratified Block"])
+    arms_num = st.sidebar.number_input("受试组数", min_value=2, max_value=6, value=2, step=1)
+    arms_names = [f"A{i+1}" for i in range(arms_num)]
+    arms_names = st.sidebar.text_input("各组名称（以逗号分隔）", ",".join(arms_names)).split(",")
+    arms_names = [a.strip() for a in arms_names if a.strip()]
+    seed = st.sidebar.number_input("随机种子 (可选)", value=0, step=1)
 
-    with tab_gen:
-        scheme = st.selectbox("随机化方案", ("简单随机", "块随机", "分层块随机"))
+    if rand_type == "Simple":
+        n = st.number_input("随机化总例数", min_value=2, value=60, step=1)
+        if st.button("🚀 生成随机化表"):
+            df = simple_randomization(n, arms_names, seed or None)
+            st.success("生成完成！")
+            st.dataframe(df.head(20))
+            csv = df.to_csv(index=False).encode("utf-8-sig")
+            st.download_button("📥 下载 CSV", csv, "randomization.csv", "text/csv")
+            if st.checkbox("保存到会话", value=True):
+                save_dataset("randomization", df)
 
-        # 受试者数量
-        n = st.number_input("受试者总数 (N)", min_value=1, step=1, value=100)
+    elif rand_type == "Blocked":
+        n = st.number_input("随机化总例数", min_value=2, value=60, step=1)
+        block_size = st.number_input("块长", min_value=len(arms_names), value=len(arms_names) * 2, step=len(arms_names))
+        if st.button("🚀 生成随机化表"):
+            try:
+                df = blocked_randomization(n, arms_names, block_size, seed or None)
+                st.dataframe(df.head(20))
+                csv = df.to_csv(index=False).encode("utf-8-sig")
+                st.download_button("📥 下载 CSV", csv, "randomization.csv", "text/csv")
+                if st.checkbox("保存到会话", value=True):
+                    save_dataset("randomization", df)
+            except Exception as e:
+                st.error(f"生成失败: {e}")
 
-        # 随机种子
-        seed = st.number_input("随机种子 (可选)", step=1, value=0)
-        seed = None if seed == 0 else int(seed)
+    else:  # Stratified
+        datasets = list_datasets()
+        if not datasets:
+            st.warning("请先在数据管理页导入待随机化人员列表")
+            return
+        src_name = st.selectbox("选择人员数据集", list(datasets.keys()))
+        df_people = datasets[src_name]
+        strat_cols = st.multiselect("选择分层变量", df_people.columns.tolist())
+        block_size = st.number_input("块长", min_value=len(arms_names), value=len(arms_names) * 2, step=len(arms_names))
+        if strat_cols and st.button("🚀 生成随机化表"):
+            try:
+                df = stratified_block_randomization(df_people, strat_cols, arms_names, block_size, seed or None)
+                st.dataframe(df.head())
+                csv = df.to_csv(index=False).encode("utf-8-sig")
+                st.download_button("📥 下载 CSV", csv, "randomization.csv", "text/csv")
+                if st.checkbox("保存到会话", value=True):
+                    save_dataset("randomization", df)
+            except Exception as e:
+                st.error(f"生成失败: {e}")
 
-        # 组别比例
-        col1, col2 = st.columns(2)
-        ratio_a = col1.number_input("A 组比例", min_value=1, step=1, value=1)
-        ratio_b = col2.number_input("B 组比例", min_value=1, step=1, value=1)
-        ratio = (int(ratio_a), int(ratio_b))
-
-        if scheme == "简单随机":
-            if st.button("生成随机表"):
-                rand_df = simple_randomization(n, ratio, seed)
-                save_rand_table(rand_df, "简单随机")
-                st.success("已生成")
-
-        elif scheme == "块随机":
-            block_size = st.number_input("块大小", min_value=sum(ratio), step=1,
-                                         value=sum(ratio))
-            if st.button("生成随机表"):
-                rand_df = permuted_block_randomization(
-                    n, int(block_size), ratio, seed
-                )
-                save_rand_table(rand_df, f"块随机(block={block_size})")
-                st.success("已生成")
-
-        else:  # stratified
-            df, name = get_dataset()
-            if df is None:
-                st.warning("需要先在数据管理中心导入数据集以供分层。")
-            else:
-                st.write(f"使用数据集：**{name}**")
-                strata_cols = st.multiselect("选择分层变量", df.columns)
-                block_size = st.number_input("块大小", min_value=sum(ratio),
-                                             step=1, value=sum(ratio))
-                if strata_cols and st.button("生成随机表"):
-                    rand_df = stratified_block_randomization(
-                        df, strata_cols, int(block_size), ratio, seed
-                    )
-                    save_rand_table(rand_df, f"分层块随机(block={block_size})")
-                    st.success("已生成")
-
-    # ───────────── 预览与导出 ─────────────
-    with tab_preview:
-        rand_df, label = get_rand_table()
-        if rand_df is None:
-            st.info("尚未生成随机表")
-        else:
-            st.subheader(f"随机表：{label}")
-            st.dataframe(rand_df.head())
-
-            # 下载按钮
-            buf = io.StringIO()
-            rand_df.to_csv(buf, index=False)
-            st.download_button(
-                "⬇️ 下载 CSV",
-                data=buf.getvalue().encode(),
-                file_name=f"randomization_{datetime.now():%Y%m%d%H%M%S}.csv",
-                mime="text/csv",
-            )
-
-
-# ╭─────────────────────────── 调试入口 ──────────────────────────╮
+# 入口
 if __name__ == "__main__":
-    st.set_page_config(page_title="随机分组生成器", layout="wide")
     randomization_ui()
