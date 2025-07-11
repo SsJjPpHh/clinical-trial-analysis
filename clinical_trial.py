@@ -203,6 +203,21 @@ def clinical_trial_analysis() -> None:
 if __name__ == "__main__":
     st.set_page_config(page_title="临床试验分析", layout="wide")
     clinical_trial_analysis()
+    
+    
+# clinical_trial.py 末尾追加
+# ------------------------------------------------------------
+def clinical_trial_ui() -> None:
+    """
+    兼容 Streamlit 主程序的统一 UI 接口。
+    如果你原来有 clinical_trial_analysis，直接调用即可。
+    """
+    # 若旧函数叫 clinical_trial_analysis，就内部调用一下
+    if "clinical_trial_analysis" in globals():
+        clinical_trial_analysis()
+    else:
+        import streamlit as st
+        st.error("尚未实现 clinical_trial_ui / clinical_trial_analysis")
 
 
             
