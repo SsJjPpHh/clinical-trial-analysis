@@ -8,6 +8,25 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+# 尝试导入自定义模块，如果失败则使用内置功能
+try:
+    from clinical_trial import clinical_trial_analysis as clinical_trial_module
+    CLINICAL_TRIAL_AVAILABLE = True
+except ImportError:
+    CLINICAL_TRIAL_AVAILABLE = False
+
+try:
+    from epidemiology import epidemiology_analysis as epidemiology_module
+    EPIDEMIOLOGY_AVAILABLE = True
+except ImportError:
+    EPIDEMIOLOGY_AVAILABLE = False
+
+try:
+    from survival import survival_analysis as survival_module
+    SURVIVAL_AVAILABLE = True
+except ImportError:
+    SURVIVAL_AVAILABLE = False
+
 # 设置页面配置
 st.set_page_config(
     page_title="临床试验数据分析平台",
@@ -22,72 +41,77 @@ plt.rcParams['axes.unicode_minus'] = False
 
 def clinical_trial_analysis():
     """临床试验数据分析模块"""
-    st.header("🧪 临床试验数据分析")
-    
-    # 侧边栏配置
-    st.sidebar.subheader("分析配置")
-    analysis_type = st.sidebar.selectbox(
-        "选择分析类型",
-        ["基础统计分析", "疗效对比分析", "安全性分析", "亚组分析"]
-    )
-    
-    # 数据上传
-    uploaded_file = st.file_uploader("上传临床试验数据", type=['csv', 'xlsx'])
-    
-    if uploaded_file is not None:
-        # 读取数据
-        try:
-            if uploaded_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_file)
-            else:
-                df = pd.read_excel(uploaded_file)
+    if CLINICAL_TRIAL_AVAILABLE:
+        # 使用导入的模块
+        clinical_trial_module()
+    else:
+        # 使用内置功能
+        st.header("🧪 临床试验数据分析")
+        
+        # 侧边栏配置
+        st.sidebar.subheader("分析配置")
+        analysis_type = st.sidebar.selectbox(
+            "选择分析类型",
+            ["基础统计分析", "疗效对比分析", "安全性分析", "亚组分析"]
+        )
+        
+        # 数据上传
+        uploaded_file = st.file_uploader("上传临床试验数据", type=['csv', 'xlsx'])
+        
+        if uploaded_file is not None:
+            # 读取数据
+            try:
+                if uploaded_file.name.endswith('.csv'):
+                    df = pd.read_csv(uploaded_file)
+                else:
+                    df = pd.read_excel(uploaded_file)
+                
+                st.success(f"数据上传成功！共 {len(df)} 行，{len(df.columns)} 列")
+                
+                # 显示数据预览
+                with st.expander("数据预览", expanded=True):
+                    st.dataframe(df.head())
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("总样本数", len(df))
+                    with col2:
+                        st.metric("变量数", len(df.columns))
+                    with col3:
+                        st.metric("缺失值", df.isnull().sum().sum())
+                
+                # 根据分析类型执行相应分析
+                if analysis_type == "基础统计分析":
+                    basic_statistics_analysis(df)
+                elif analysis_type == "疗效对比分析":
+                    efficacy_analysis(df)
+                elif analysis_type == "安全性分析":
+                    safety_analysis(df)
+                elif analysis_type == "亚组分析":
+                    subgroup_analysis(df)
+                    
+            except Exception as e:
+                st.error(f"数据读取失败: {str(e)}")
+        else:
+            # 显示示例数据
+            st.info("请上传数据文件，或使用下面的示例数据进行演示")
+            if st.button("生成示例数据"):
+                df = generate_sample_data()
+                st.session_state.sample_data = df
+                st.success("示例数据生成成功！")
             
-            st.success(f"数据上传成功！共 {len(df)} 行，{len(df.columns)} 列")
-            
-            # 显示数据预览
-            with st.expander("数据预览", expanded=True):
+            if 'sample_data' in st.session_state:
+                df = st.session_state.sample_data
                 st.dataframe(df.head())
                 
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("总样本数", len(df))
-                with col2:
-                    st.metric("变量数", len(df.columns))
-                with col3:
-                    st.metric("缺失值", df.isnull().sum().sum())
-            
-            # 根据分析类型执行相应分析
-            if analysis_type == "基础统计分析":
-                basic_statistics_analysis(df)
-            elif analysis_type == "疗效对比分析":
-                efficacy_analysis(df)
-            elif analysis_type == "安全性分析":
-                safety_analysis(df)
-            elif analysis_type == "亚组分析":
-                subgroup_analysis(df)
-                
-        except Exception as e:
-            st.error(f"数据读取失败: {str(e)}")
-    else:
-        # 显示示例数据
-        st.info("请上传数据文件，或使用下面的示例数据进行演示")
-        if st.button("生成示例数据"):
-            df = generate_sample_data()
-            st.session_state.sample_data = df
-            st.success("示例数据生成成功！")
-        
-        if 'sample_data' in st.session_state:
-            df = st.session_state.sample_data
-            st.dataframe(df.head())
-            
-            if analysis_type == "基础统计分析":
-                basic_statistics_analysis(df)
-            elif analysis_type == "疗效对比分析":
-                efficacy_analysis(df)
-            elif analysis_type == "安全性分析":
-                safety_analysis(df)
-            elif analysis_type == "亚组分析":
-                subgroup_analysis(df)
+                if analysis_type == "基础统计分析":
+                    basic_statistics_analysis(df)
+                elif analysis_type == "疗效对比分析":
+                    efficacy_analysis(df)
+                elif analysis_type == "安全性分析":
+                    safety_analysis(df)
+                elif analysis_type == "亚组分析":
+                    subgroup_analysis(df)
 
 def generate_sample_data():
     """生成示例临床试验数据"""
@@ -365,13 +389,19 @@ def subgroup_analysis(df):
 
 def epidemiology_analysis():
     """流行病学分析模块"""
-    st.header("📈 流行病学分析")
-    st.info("流行病学分析模块正在开发中...")
+    if EPIDEMIOLOGY_AVAILABLE:
+        epidemiology_module()
+    else:
+        st.header("📈 流行病学分析")
+        st.info("流行病学分析模块正在开发中...")
 
 def survival_analysis():
     """生存分析模块"""
-    st.header("⏱️ 生存分析")
-    st.info("生存分析模块正在开发中...")
+    if SURVIVAL_AVAILABLE:
+        survival_module()
+    else:
+        st.header("⏱️ 生存分析")
+        st.info("生存分析模块正在开发中...")
 
 def main():
     """主函数"""
