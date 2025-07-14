@@ -56,7 +56,7 @@ def sample_size_ui() -> None:
 
     if design == "均数差":
         delta = st.number_input("期望均数差 Δ", 0.0, 1e3, 5.0)
-        sd = st.number_input("组内标准差 σ", 0.0001, 1e3.0, 10.0)
+        sd = st.number_input("组内标准差 σ", 0.0001, 1e3, 10.0)
         if st.button("🧮 计算样本量"):
             n_control = two_mean_sample_size(delta, sd, alpha, power, ratio)
             n_treat = n_control * ratio
